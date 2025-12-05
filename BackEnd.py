@@ -35,6 +35,7 @@ async def lifespan(app: FastAPI):
             # Load Data
             print("Loading CSV...")
             df = pd.read_csv(csv_path)
+            df = df.head(40000)
             
             # Clean column names
             df.columns = df.columns.str.strip().str.lower().str.replace(' ', '_')
