@@ -1,11 +1,12 @@
+# BackEnd.py  — TF-IDF version, memory-friendly
+
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
 from contextlib import asynccontextmanager
-import re
-
 import os
+import re
 from typing import Optional
 
 import numpy as np
@@ -13,11 +14,13 @@ import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-
 CSV_FILENAME = "cleaned_steam_games.csv"
 dataset_context: dict = {}
-
 current_dir = os.path.dirname(os.path.abspath(__file__))
+
+# hard cap to avoid OOM on Render free tier
+MAX_GAMES = 20000
+MAX_TFIDF_FEATURES = 3000
 
 
 def clean_price(price_val):
@@ -27,7 +30,6 @@ def clean_price(price_val):
         s = str(price_val).lower().strip()
         if "free" in s:
             return 0.0
-        # keep digits + dot
         s = "".join(c for c in s if c.isdigit() or c == ".")
         return float(s) if s else 0.0
     except Exception:
@@ -37,7 +39,6 @@ def clean_price(price_val):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print(f"Looking for local file: {CSV_FILENAME}...")
-
     csv_path = os.path.join(current_dir, CSV_FILENAME)
 
     if os.path.exists(csv_path):
@@ -47,8 +48,22 @@ async def lifespan(app: FastAPI):
 
             # standardize col names
             df.columns = (
-                df.columns.str.strip().str.lower().str.replace(" ", "_")
+                df.columns.str.strip()
+                .str.lower()
+                .str.replace(" ", "_")
             )
+
+            # optional: keep only the most "important" games to save RAM
+            if len(df) > MAX_GAMES:
+                print(f"Truncating dataset from {len(df)} to {MAX_GAMES} rows.")
+                if "num_reviews_total" in df.columns:
+                    df = (
+                        df.sort_values("num_reviews_total", ascending=False)
+                        .head(MAX_GAMES)
+                    )
+                else:
+                    df = df.head(MAX_GAMES)
+                df = df.reset_index(drop=True)
 
             # normalized name for fuzzy-ish search: remove non-alphanumerics
             df["search_name"] = (
@@ -62,22 +77,27 @@ async def lifespan(app: FastAPI):
             df["genres"] = df.get("genres", "").fillna("")
             df["about_the_game"] = df.get("about_the_game", "").fillna("")
 
-            # simple content-based features (genres + about text)
+            # simple content-based features (genres + truncated about text)
             df["combined_features"] = (
-                df["genres"] + " " + df["about_the_game"].astype(str).str.slice(0, 500)
+                df["genres"]
+                + " "
+                + df["about_the_game"].astype(str).str.slice(0, 400)
             )
 
             tfidf = TfidfVectorizer(
                 stop_words="english",
-                max_features=3000,
-                dtype=np.float32,  # reduce memory
+                max_features=MAX_TFIDF_FEATURES,
+                dtype=np.float32,
             )
             feature_matrix = tfidf.fit_transform(df["combined_features"])
 
             dataset_context["df"] = df
             dataset_context["feature_matrix"] = feature_matrix
 
-            print(f"Success! API is ready with {len(df)} games.")
+            print(
+                f"Success! API is ready with {len(df)} games "
+                f"and {feature_matrix.shape[1]} TF-IDF features."
+            )
         except Exception as e:
             print("Error loading data:", e)
             dataset_context["df"] = pd.DataFrame()
@@ -126,11 +146,10 @@ def get_games(limit: int = 10, search: Optional[str] = None):
             df["name"].astype(str).str.contains(search, case=False, na=False)
         ]
 
-        # normalized "pub g" -> "pubg" match
+        # normalized "pub g" -> "pubg"
         norm_query = re.sub(r"[^a-z0-9]", "", search.lower())
-        norm_matches = df[
-            df["search_name"].str.contains(norm_query, na=False)
-        ]
+        norm_mask = df["search_name"].str.contains(norm_query, na=False)
+        norm_matches = df[norm_mask]
 
         # combine and drop duplicates
         filtered_df = pd.concat([base_matches, norm_matches]).drop_duplicates()
@@ -172,6 +191,7 @@ def get_recommendation(
     if matches.empty:
         raise HTTPException(status_code=404, detail="Game not found")
 
+    # after reset_index, df index is 0..N-1 and lines up with TF-IDF rows
     idx = matches.index[0]
     matched_name = df.iloc[idx]["name"]
 
@@ -179,8 +199,11 @@ def get_recommendation(
     target_vec = feature_matrix.getrow(idx)
     sim_scores = cosine_similarity(target_vec, feature_matrix).flatten()
 
+    # avoid recommending the exact same game
+    sim_scores[idx] = -1.0
+
     # take a pool of most similar to allow filtering
-    top_idx = sim_scores.argsort()[-100:-1][::-1]
+    top_idx = sim_scores.argsort()[-100:][::-1]
     candidate_df = df.iloc[top_idx].copy()
 
     # ---- apply price filter (if any) ----
@@ -220,7 +243,7 @@ def get_recommendation(
 
     response_data = results[cols_to_return].to_dict(orient="records")
 
-    # normalize key name to 'app_id'
+    # normalize key name to 'app_id' for frontend
     if app_id_col:
         for item in response_data:
             if app_id_col in item:
