@@ -1,6 +1,8 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+import numpy as np
+
 
 import pandas as pd
 import os
@@ -46,8 +48,15 @@ async def lifespan(app: FastAPI):
             df['combined_features'] = df['genres'] + " " + df['about_the_game'].astype(str).str.slice(0, 500)
 
             # Create Matrix
-            tfidf = TfidfVectorizer(stop_words='english', max_features=5000)
+            # Create Matrix
+            tfidf = TfidfVectorizer(
+                stop_words='english',
+                max_features=3000,      # was 5000
+                dtype=np.float32        # <-- add this
+            )
             feature_matrix = tfidf.fit_transform(df['combined_features'])
+
+
             
             # Save to Context
             dataset_context["df"] = df
