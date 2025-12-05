@@ -1,27 +1,42 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, Response
 from contextlib import asynccontextmanager
 
-import pandas as pd
-import numpy as np
 import os
+from typing import Optional
 
+import numpy as np
+import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-# ---- GLOBAL CONFIG ----
+
 CSV_FILENAME = "cleaned_steam_games.csv"
 dataset_context: dict = {}
 
-# Base directory for index.html + static files
 current_dir = os.path.dirname(os.path.abspath(__file__))
+
+
+def clean_price(price_val):
+    try:
+        if pd.isna(price_val):
+            return 0.0
+        s = str(price_val).lower().strip()
+        if "free" in s:
+            return 0.0
+        # keep digits + dot
+        s = "".join(c for c in s if c.isdigit() or c == ".")
+        return float(s) if s else 0.0
+    except Exception:
+        return 0.0
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print(f"Looking for local file: {CSV_FILENAME}...")
+
     csv_path = os.path.join(current_dir, CSV_FILENAME)
 
     if os.path.exists(csv_path):
@@ -29,27 +44,29 @@ async def lifespan(app: FastAPI):
             print("Loading CSV...")
             df = pd.read_csv(csv_path)
 
-            # Normalize column names
-            df.columns = df.columns.str.strip().str.lower().str.replace(" ", "_")
+            # standardize col names
+            df.columns = (
+                df.columns.str.strip().str.lower().str.replace(" ", "_")
+            )
 
-            # OPTIONAL: downsample for memory safety on free tier
-            # Comment this out if you want all rows and your host has enough RAM
-            # df = df.head(40000)
+            # OPTIONAL: keep only most popular N games to save RAM
+            # if "positive_ratings" in df.columns:
+            #     df = df.sort_values("positive_ratings", ascending=False).head(40000)
+            # else:
+            #     df = df.head(40000)
 
-            print("Preparing TF-IDF features...")
-            df["genres"] = df["genres"].fillna("")
-            df["about_the_game"] = df["about_the_game"].fillna("")
+            print("Preparing TF-IDF model...")
+            df["genres"] = df.get("genres", "").fillna("")
+            df["about_the_game"] = df.get("about_the_game", "").fillna("")
 
-            # Text feature: genres + truncated description
             df["combined_features"] = (
                 df["genres"] + " " + df["about_the_game"].astype(str).str.slice(0, 500)
             )
 
-            # Lighter TF-IDF: fewer features + float32
             tfidf = TfidfVectorizer(
                 stop_words="english",
-                max_features=3000,   # was higher before; this saves memory
-                dtype=np.float32     # 4 bytes instead of 8
+                max_features=3000,
+                dtype=np.float32,  # reduce memory
             )
             feature_matrix = tfidf.fit_transform(df["combined_features"])
 
@@ -58,7 +75,7 @@ async def lifespan(app: FastAPI):
 
             print(f"Success! API is ready with {len(df)} games.")
         except Exception as e:
-            print(f"Error loading data: {e}")
+            print("Error loading data:", e)
             dataset_context["df"] = pd.DataFrame()
             dataset_context["feature_matrix"] = None
     else:
@@ -66,19 +83,16 @@ async def lifespan(app: FastAPI):
         dataset_context["df"] = pd.DataFrame()
         dataset_context["feature_matrix"] = None
 
-    # Run the app
     yield
-
-    # Cleanup on shutdown
     dataset_context.clear()
 
 
 app = FastAPI(lifespan=lifespan)
 
-# Serve static files (logo, favicon, etc.)
+# static files (logo, etc.)
 app.mount("/static", StaticFiles(directory=current_dir), name="static")
 
-# CORS - open for now (fine for this project)
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -88,25 +102,24 @@ app.add_middleware(
 )
 
 
-# ---- ROUTES ----
-
 @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
 def serve_index(request: Request):
-    # Let Render do HEAD / for health checks
+    # allow Render health checks
     if request.method == "HEAD":
         return Response(status_code=200)
     return FileResponse(os.path.join(current_dir, "index.html"))
 
 
 @app.get("/games")
-def get_games(limit: int = 10, search: str | None = None):
+def get_games(limit: int = 10, search: Optional[str] = None):
     df = dataset_context.get("df")
     if df is None or df.empty:
         return []
 
     if search:
-        mask = df["name"].astype(str).str.contains(search, case=False, na=False)
-        filtered_df = df[mask]
+        filtered_df = df[
+            df["name"].astype(str).str.contains(search, case=False, na=False)
+        ]
     else:
         filtered_df = df
 
@@ -115,43 +128,77 @@ def get_games(limit: int = 10, search: str | None = None):
 
 
 @app.get("/recommend")
-def get_recommendation(game_name: str):
+def get_recommendation(
+    game_name: str,
+    price_filter: Optional[str] = Query(None),
+):
     df = dataset_context.get("df")
     feature_matrix = dataset_context.get("feature_matrix")
 
     if df is None or df.empty or feature_matrix is None:
         raise HTTPException(status_code=500, detail="Model not loaded")
 
-    # Exact match first
-    names = df["name"].astype(str)
-    matches = df[names.str.lower() == game_name.lower()]
-
-    # Partial match fallback
+    # exact match
+    matches = df[df["name"].astype(str).str.lower() == game_name.lower()]
+    # partial match
     if matches.empty:
-        matches = df[names.str.lower().str.contains(game_name.lower(), regex=False)]
+        matches = df[
+            df["name"]
+            .astype(str)
+            .str.lower()
+            .str.contains(game_name.lower(), regex=False)
+        ]
 
     if matches.empty:
         raise HTTPException(status_code=404, detail="Game not found")
 
-    # Use first match
     idx = matches.index[0]
     matched_name = df.iloc[idx]["name"]
 
-    # Similarity via TF-IDF
+    # similarity
     target_vec = feature_matrix.getrow(idx)
     sim_scores = cosine_similarity(target_vec, feature_matrix).flatten()
 
-    # Get top 5 similar (skip the game itself)
-    similar_idx = sim_scores.argsort()[-6:-1][::-1]
-    results = df.iloc[similar_idx]
+    # take a pool of most similar to allow filtering
+    top_idx = sim_scores.argsort()[-100:-1][::-1]
+    candidate_df = df.iloc[top_idx].copy()
+
+    # ---- apply price filter (if any) ----
+    if price_filter and price_filter != "any":
+        candidate_df["numeric_price"] = candidate_df["price"].apply(clean_price)
+
+        if price_filter == "free":
+            candidate_df = candidate_df[candidate_df["numeric_price"] == 0]
+        elif price_filter == "under_5":
+            candidate_df = candidate_df[candidate_df["numeric_price"] < 5]
+        elif price_filter == "under_10":
+            candidate_df = candidate_df[candidate_df["numeric_price"] < 10]
+        elif price_filter == "under_30":
+            candidate_df = candidate_df[candidate_df["numeric_price"] < 30]
+        elif price_filter == "under_50":
+            candidate_df = candidate_df[candidate_df["numeric_price"] < 50]
+        elif price_filter == "above_50":
+            candidate_df = candidate_df[candidate_df["numeric_price"] >= 50]
+
+    # final top 5
+    results = candidate_df.head(5)
     results = results.where(pd.notnull(results), None)
 
-    # Include header_image if the column exists
-    cols = ["name", "genres", "about_the_game", "price"]
-    if "header_image" in df.columns:
-        cols.append("header_image")
+    # detect id column for Steam link
+    possible_id_cols = ["appid", "app_id", "steam_appid", "id"]
+    app_id_col = next((c for c in possible_id_cols if c in df.columns), None)
 
-    response_data = results[cols].to_dict(orient="records")
+    cols_to_return = ["name", "genres", "about_the_game", "price", "header_image"]
+    if app_id_col:
+        cols_to_return.append(app_id_col)
+
+    response_data = results[cols_to_return].to_dict(orient="records")
+
+    # normalize key name to 'app_id'
+    if app_id_col:
+        for item in response_data:
+            if app_id_col in item:
+                item["app_id"] = item.pop(app_id_col)
 
     return {
         "source_game": matched_name,
