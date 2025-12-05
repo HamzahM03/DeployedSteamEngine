@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
 from contextlib import asynccontextmanager
+import re
 
 import os
 from typing import Optional
@@ -49,16 +50,19 @@ async def lifespan(app: FastAPI):
                 df.columns.str.strip().str.lower().str.replace(" ", "_")
             )
 
-            # OPTIONAL: keep only most popular N games to save RAM
-            # if "positive_ratings" in df.columns:
-            #     df = df.sort_values("positive_ratings", ascending=False).head(40000)
-            # else:
-            #     df = df.head(40000)
+            # normalized name for fuzzy-ish search: remove non-alphanumerics
+            df["search_name"] = (
+                df["name"]
+                .astype(str)
+                .str.lower()
+                .str.replace(r"[^a-z0-9]", "", regex=True)
+            )
 
             print("Preparing TF-IDF model...")
             df["genres"] = df.get("genres", "").fillna("")
             df["about_the_game"] = df.get("about_the_game", "").fillna("")
 
+            # simple content-based features (genres + about text)
             df["combined_features"] = (
                 df["genres"] + " " + df["about_the_game"].astype(str).str.slice(0, 500)
             )
@@ -117,9 +121,19 @@ def get_games(limit: int = 10, search: Optional[str] = None):
         return []
 
     if search:
-        filtered_df = df[
+        # original loose match on raw name
+        base_matches = df[
             df["name"].astype(str).str.contains(search, case=False, na=False)
         ]
+
+        # normalized "pub g" -> "pubg" match
+        norm_query = re.sub(r"[^a-z0-9]", "", search.lower())
+        norm_matches = df[
+            df["search_name"].str.contains(norm_query, na=False)
+        ]
+
+        # combine and drop duplicates
+        filtered_df = pd.concat([base_matches, norm_matches]).drop_duplicates()
     else:
         filtered_df = df
 
@@ -138,9 +152,10 @@ def get_recommendation(
     if df is None or df.empty or feature_matrix is None:
         raise HTTPException(status_code=500, detail="Model not loaded")
 
-    # exact match
+    # exact match on full name
     matches = df[df["name"].astype(str).str.lower() == game_name.lower()]
-    # partial match
+
+    # partial match on raw name
     if matches.empty:
         matches = df[
             df["name"]
@@ -148,6 +163,11 @@ def get_recommendation(
             .str.lower()
             .str.contains(game_name.lower(), regex=False)
         ]
+
+    # normalized match "pub g" -> "pubg"
+    if matches.empty and "search_name" in df.columns:
+        norm_query = re.sub(r"[^a-z0-9]", "", game_name.lower())
+        matches = df[df["search_name"].str.contains(norm_query, na=False)]
 
     if matches.empty:
         raise HTTPException(status_code=404, detail="Game not found")
@@ -189,6 +209,12 @@ def get_recommendation(
     app_id_col = next((c for c in possible_id_cols if c in df.columns), None)
 
     cols_to_return = ["name", "genres", "about_the_game", "price", "header_image"]
+
+    # add optional review columns if present
+    for col in ["pct_pos_total", "num_reviews_total"]:
+        if col in df.columns:
+            cols_to_return.append(col)
+
     if app_id_col:
         cols_to_return.append(app_id_col)
 

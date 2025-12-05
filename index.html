@@ -44,18 +44,90 @@
       -webkit-line-clamp: 3;
       -webkit-box-orient: vertical;
       overflow: hidden;
+
     }
+        :root {
+      --steam-bg-dark: #0b1020;
+      --steam-bg-dark2: #171a21;
+      --steam-card-dark: #1b2838;
+      --steam-card-border: #2a475e;
+      --steam-accent: #66c0f4;
+      --steam-accent-soft: #2a475e;
+    }
+
+    body.theme-light {
+      background-color: #f8f9fa;
+      color: #111827;
+    }
+
+    body.theme-dark {
+      background:
+        radial-gradient(circle at top, #1b2838 0, #0b1020 50%, #020617 100%);
+      color: #e5e7eb;
+    }
+
+    body.theme-dark header {
+      background-color: var(--steam-bg-dark2);
+      box-shadow: none;
+      border-bottom: 1px solid #111827;
+    }
+
+    body.theme-dark .brand-text {
+      color: var(--steam-accent);
+    }
+
+    body.theme-dark #game-input {
+      background-color: var(--steam-card-dark);
+      border-color: var(--steam-card-border);
+      color: #e5e7eb;
+    }
+
+    body.theme-dark #game-input::placeholder {
+      color: #9ca3af;
+    }
+
+    body.theme-dark .card {
+      background-color: var(--steam-card-dark);
+      border-color: var(--steam-card-border);
+    }
+
+    body.theme-dark .price-filter-box {
+      background-color: var(--steam-card-dark);
+      border-color: var(--steam-card-border);
+    }
+
+    body.theme-dark .price-filter-box label {
+      background-color: #111827;
+      border-color: #374151;
+      color: #e5e7eb;
+    }
+
+    body.theme-dark .price-filter-box input:checked + span {
+      color: var(--steam-accent);
+    }
+
+    body.theme-dark a {
+      color: var(--steam-accent);
+    }
+
+    body.theme-dark a:hover {
+      color: #9cd9ff;
+    }
+
   </style>
 </head>
-<body class="text-gray-900">
+  <body class="text-gray-900 theme-light">
+
   <header class="bg-white shadow-md sticky top-0 z-30">
     <nav
       class="container mx-auto px-6 py-4 flex justify-between items-center"
     >
-      <a
+            <a
         href="#"
-        class="flex items-center gap-3 text-2xl font-bold text-indigo-600 hover:text-indigo-700 transition"
+        id="logo-link"
+        class="flex items-center gap-3 text-2xl font-bold brand-text hover:opacity-90 transition"
       >
+
         <img
           src="/static/Steam_Engine.png"
           alt="Logo"
@@ -64,9 +136,29 @@
         <span>Steam Engine</span>
       </a>
 
-      <div class="space-x-8">
-        <a href="#" class="text-gray-600 hover:text-indigo-600">Home</a>
+            <div class="flex items-center gap-4">
+        <!-- Home as a BUTTON so JS fully controls it -->
+        <button
+          id="home-link"
+          type="button"
+          class="text-gray-600 hover:text-indigo-600 dark:text-gray-300 text-sm font-medium"
+        >
+          Home
+        </button>
+
+        <!-- 🌙 / ☀️ theme toggle -->
+        <button
+          id="theme-toggle"
+          class="flex items-center gap-2 text-sm px-3 py-1.5 rounded-full border border-gray-300 hover:border-indigo-500 hover:text-indigo-600 transition bg-white/80 backdrop-blur-sm"
+          type="button"
+        >
+          🌙 <span>Dark Mode</span>
+        </button>
       </div>
+
+
+
+    
     </nav>
   </header>
 
@@ -89,7 +181,8 @@
     <!-- SEARCH & FILTER SECTION -->
     <div class="w-full max-w-xl relative z-20 space-y-4">
       <!-- Price filters -->
-      <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+        <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm price-filter-box">
+
         <label class="text-sm font-bold text-gray-700 block mb-3">
           Price Filter (Select One)
         </label>
@@ -367,6 +460,18 @@
       }
     }
 
+    // Turn a 0–100% rating into a 5-star string like ★★★★☆
+    function renderStarsFromPct(pct) {
+      const rating = pct / 20; // converts 0-100% to 0-5 scale
+      const full = Math.floor(rating);
+      const half = rating % 1 >= 0.5 ? 1 : 0;
+      const empty = 5 - full - half;
+
+      return "★".repeat(full) + (half ? "½" : "") + "☆".repeat(empty);
+  }
+
+
+
     function renderCards(games) {
   cardsContainer.innerHTML = "";
 
@@ -379,7 +484,8 @@
   games.forEach((game) => {
     const card = document.createElement("div");
     card.className =
-      "bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition duration-300 flex flex-col h-full border border-gray-100 group";
+      "card bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition duration-300 flex flex-col h-full border border-gray-100 group";
+
 
     const cleanDesc = game.about_the_game
       ? game.about_the_game.replace(/<[^>]*>?/gm, "")
@@ -397,7 +503,20 @@
 
     const linkTarget = game.app_id ? "_blank" : "_blank";
 
-    card.innerHTML = `
+    let reviewsHtml = "";
+    if (game.pct_pos_total != null && game.num_reviews_total != null) {
+      const pct = Math.round(Number(game.pct_pos_total));
+      const count = Number(game.num_reviews_total).toLocaleString();
+      const stars = renderStarsFromPct(pct);
+      reviewsHtml = `
+        <div class="mt-2 text-xs text-gray-500 flex items-center gap-2">
+          <span class="text-yellow-500">${stars}</span>
+          <span>${pct}% positive (${count} reviews)</span>
+        </div>
+      `;
+    }
+
+        card.innerHTML = `
       <a href="${steamUrl}" target="${linkTarget}" class="block relative overflow-hidden">
         <img src="${imageSrc}" alt="${game.name}" class="w-full h-48 object-cover transform group-hover:scale-105 transition duration-500">
         <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 transition duration-300"></div>
@@ -407,13 +526,18 @@
           <h3 class="text-xl font-bold text-gray-900 mb-2 group-hover:text-indigo-600 transition">
             <a href="${steamUrl}" target="${linkTarget}">${game.name}</a>
           </h3>
+
           <span class="inline-block bg-indigo-100 text-indigo-800 text-xs px-2 py-1 rounded-full font-semibold">
             ${game.genres || "Game"}
           </span>
+
+          ${reviewsHtml} <!-- ⭐ Now displays rating if data exists -->
         </div>
+
         <p class="text-gray-600 text-sm line-clamp-3 mb-4 flex-grow">
           ${cleanDesc}
         </p>
+
         <div class="pt-4 border-t border-gray-100 flex justify-between items-center">
           <span class="text-gray-900 font-bold">$${game.price || "0.00"}</span>
           <a href="${steamUrl}" target="${linkTarget}" class="text-indigo-600 hover:text-indigo-800 text-sm font-medium flex items-center gap-1">
@@ -427,6 +551,7 @@
 }
 
 
+
     document.addEventListener("click", (e) => {
       if (
         !gameInput.contains(e.target) &&
@@ -435,6 +560,80 @@
         resultsContainer.classList.add("hidden");
       }
     });
+        // THEME TOGGLE (light / dark)
+          // THEME TOGGLE (light / dark)
+    const themeToggle = document.getElementById("theme-toggle");
+    const bodyEl = document.body;
+
+    function setTheme(theme) {
+      bodyEl.classList.remove("theme-light", "theme-dark");
+      if (theme === "dark") {
+        bodyEl.classList.add("theme-dark");
+        if (themeToggle) {
+          themeToggle.innerHTML = '☀️ <span>Light Mode</span>';
+        }
+      } else {
+        bodyEl.classList.add("theme-light");
+        if (themeToggle) {
+          themeToggle.innerHTML = '🌙 <span>Dark Mode</span>';
+        }
+      }
+      try {
+        localStorage.setItem("theme", theme);
+      } catch (e) {
+        // ignore if localStorage blocked
+      }
+    }
+
+    // load saved theme if available
+    let savedTheme = "light";
+    try {
+      const stored = localStorage.getItem("theme");
+      if (stored === "light" || stored === "dark") {
+        savedTheme = stored;
+      }
+    } catch (e) {}
+    setTheme(savedTheme);
+
+    if (themeToggle) {
+      themeToggle.addEventListener("click", () => {
+        const newTheme = bodyEl.classList.contains("theme-dark")
+          ? "light"
+          : "dark";
+        setTheme(newTheme);
+      });
+    }
+
+    // HOME / LOGO reset UI to default
+    const homeLink = document.getElementById("home-link");
+    const logoLink = document.getElementById("logo-link"); // only works if you added that id
+
+    function resetUI() {
+      gameInput.value = "";
+      resultsContainer.classList.add("hidden");
+      recSection.classList.add("hidden");
+      cardsContainer.innerHTML = "";
+      selectedGameLabel.textContent = "...";
+
+      const anyRadio = document.querySelector(
+        'input[name="price_filter"][value="any"]'
+      );
+      if (anyRadio) anyRadio.checked = true;
+
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    if (homeLink) {
+      homeLink.addEventListener("click", resetUI);
+    }
+
+    if (logoLink) {
+      logoLink.addEventListener("click", resetUI);
+    }
+
+
+
+
   </script>
 </body>
 </html>
