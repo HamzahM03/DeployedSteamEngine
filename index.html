@@ -354,6 +354,11 @@
         if (!response.ok) throw new Error("Failed");
 
         const data = await response.json();
+
+        console.log("API returned:", data);
+        console.log("Each recommendation:", data.recommendations);
+
+
         selectedGameLabel.textContent = data.source_game;
         renderCards(data.recommendations);
       } catch (err) {
@@ -363,59 +368,64 @@
     }
 
     function renderCards(games) {
-      cardsContainer.innerHTML = "";
+  cardsContainer.innerHTML = "";
 
-      if (!games || !games.length) {
-        cardsContainer.innerHTML =
-          '<div class="col-span-full text-center text-gray-500">No games found with the selected filters.</div>';
-        return;
-      }
+  if (!games || !games.length) {
+    cardsContainer.innerHTML =
+      '<div class="col-span-full text-center text-gray-500">No games found with the selected filters.</div>';
+    return;
+  }
 
-      games.forEach((game) => {
-        const card = document.createElement("div");
-        card.className =
-          "bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition duration-300 flex flex-col h-full border border-gray-100 group";
+  games.forEach((game) => {
+    const card = document.createElement("div");
+    card.className =
+      "bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition duration-300 flex flex-col h-full border border-gray-100 group";
 
-        const cleanDesc = game.about_the_game
-          ? game.about_the_game.replace(/<[^>]*>?/gm, "")
-          : "No description available.";
+    const cleanDesc = game.about_the_game
+      ? game.about_the_game.replace(/<[^>]*>?/gm, "")
+      : "No description available.";
 
-        const imageSrc =
-          game.header_image || "https://placehold.co/600x400?text=No+Image";
+    const imageSrc =
+      game.header_image || "https://placehold.co/600x400?text=No+Image";
 
-        const steamUrl = game.app_id
-          ? `https://store.steampowered.com/app/${game.app_id}`
-          : "#";
-        const linkTarget = game.app_id ? "_blank" : "_self";
+    // 🔥 new: fall back to Steam search using the game name
+    const steamUrl = game.app_id
+      ? `https://store.steampowered.com/app/${game.app_id}`
+      : `https://store.steampowered.com/search/?term=${encodeURIComponent(
+          game.name || ""
+        )}`;
 
-        card.innerHTML = `
-          <a href="${steamUrl}" target="${linkTarget}" class="block relative overflow-hidden">
-            <img src="${imageSrc}" alt="${game.name}" class="w-full h-48 object-cover transform group-hover:scale-105 transition duration-500">
-            <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 transition duration-300"></div>
+    const linkTarget = game.app_id ? "_blank" : "_blank";
+
+    card.innerHTML = `
+      <a href="${steamUrl}" target="${linkTarget}" class="block relative overflow-hidden">
+        <img src="${imageSrc}" alt="${game.name}" class="w-full h-48 object-cover transform group-hover:scale-105 transition duration-500">
+        <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 transition duration-300"></div>
+      </a>
+      <div class="p-6 flex-grow flex flex-col">
+        <div class="mb-4">
+          <h3 class="text-xl font-bold text-gray-900 mb-2 group-hover:text-indigo-600 transition">
+            <a href="${steamUrl}" target="${linkTarget}">${game.name}</a>
+          </h3>
+          <span class="inline-block bg-indigo-100 text-indigo-800 text-xs px-2 py-1 rounded-full font-semibold">
+            ${game.genres || "Game"}
+          </span>
+        </div>
+        <p class="text-gray-600 text-sm line-clamp-3 mb-4 flex-grow">
+          ${cleanDesc}
+        </p>
+        <div class="pt-4 border-t border-gray-100 flex justify-between items-center">
+          <span class="text-gray-900 font-bold">$${game.price || "0.00"}</span>
+          <a href="${steamUrl}" target="${linkTarget}" class="text-indigo-600 hover:text-indigo-800 text-sm font-medium flex items-center gap-1">
+            View on Steam
           </a>
-          <div class="p-6 flex-grow flex flex-col">
-            <div class="mb-4">
-              <h3 class="text-xl font-bold text-gray-900 mb-2 group-hover:text-indigo-600 transition">
-                <a href="${steamUrl}" target="${linkTarget}">${game.name}</a>
-              </h3>
-              <span class="inline-block bg-indigo-100 text-indigo-800 text-xs px-2 py-1 rounded-full font-semibold">
-                ${game.genres || "Game"}
-              </span>
-            </div>
-            <p class="text-gray-600 text-sm line-clamp-3 mb-4 flex-grow">
-              ${cleanDesc}
-            </p>
-            <div class="pt-4 border-t border-gray-100 flex justify-between items-center">
-              <span class="text-gray-900 font-bold">$${game.price || "0.00"}</span>
-              <a href="${steamUrl}" target="${linkTarget}" class="text-indigo-600 hover:text-indigo-800 text-sm font-medium flex items-center gap-1">
-                View on Steam
-              </a>
-            </div>
-          </div>
-        `;
-        cardsContainer.appendChild(card);
-      });
-    }
+        </div>
+      </div>
+    `;
+    cardsContainer.appendChild(card);
+  });
+}
+
 
     document.addEventListener("click", (e) => {
       if (
