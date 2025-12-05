@@ -5,11 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Game Recommender</title>
     
-    <!-- Use static path so FastAPI can serve this -->
+    <!-- Favicon from /static -->
     <link rel="icon" type="image/png" href="/static/Steam_Engine.png">
 
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f8f9fa; }
         #autocomplete-results { max-height: 20rem; overflow-y: auto; }
@@ -121,8 +122,8 @@
             if (e.key === 'Enter') {
                 const query = gameInput.value.trim();
                 if (query.length > 0) {
-                    resultsContainer.classList.add('hidden'); // Hide dropdown
-                    getRecommendations(query);               // Send partial text directly
+                    resultsContainer.classList.add('hidden');
+                    getRecommendations(query);
                 }
             }
         });
@@ -130,17 +131,17 @@
         async function fetchSearchMatches(query) {
             try {
                 spinner.style.display = 'block';
-
-                // Use relative URL so it works locally and when deployed
                 const response = await fetch(`/games?limit=6&search=${encodeURIComponent(query)}`);
+
                 if (!response.ok) throw new Error("API Error");
 
                 const games = await response.json();
-                statusBadge.classList.add('hidden'); 
+                statusBadge.classList.add('hidden');
                 displayDropdown(games);
             } catch (error) {
-                statusBadge.classList.remove('hidden'); 
-                const mockResults = mockDatabase.filter(g => 
+                console.error("fetchSearchMatches error:", error);
+                statusBadge.classList.remove('hidden');
+                const mockResults = mockDatabase.filter(g =>
                     g.name.toLowerCase().includes(query.toLowerCase())
                 );
                 displayDropdown(mockResults);
@@ -176,22 +177,19 @@
             cardsContainer.innerHTML = '<div class="col-span-full text-center py-10 text-gray-500">Finding best match and generating recommendations...</div>';
 
             try {
-                // Relative URL again
                 const response = await fetch(`/recommend?game_name=${encodeURIComponent(gameName)}`);
-                
+
                 if (response.status === 404) {
                     cardsContainer.innerHTML = '<div class="col-span-full text-center text-red-500 font-bold">No game found matching that name. Try being more specific.</div>';
                     return;
                 }
                 if (!response.ok) throw new Error("Failed to get recommendations");
-                
+
                 const data = await response.json();
                 selectedGameLabel.textContent = data.source_game;
                 renderCards(data.recommendations);
-
             } catch (error) {
-                console.warn("Rec error:", error);
-                // Fallback Logic
+                console.error("getRecommendations error:", error);
                 const mockRecs = mockDatabase;
                 renderCards(mockRecs);
             }
@@ -208,10 +206,12 @@
             games.forEach(game => {
                 const card = document.createElement('div');
                 card.className = 'bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition duration-300 flex flex-col h-full border border-gray-100';
-                
+
                 const cleanDesc = game.about_the_game
                     ? game.about_the_game.replace(/<[^>]*>?/gm, '')
                     : 'No description available.';
+
+                const gameImage = game.header_image || 'https://via.placeholder.com/600x400?text=No+Image';
 
                 card.innerHTML = `
                     <div class="p-6 flex-grow flex flex-col">
@@ -221,6 +221,7 @@
                                 ${game.genres || 'Game'}
                             </span>
                         </div>
+                        <img src="${gameImage}" alt="${game.name}" class="w-full h-48 object-cover rounded-lg mb-4">
                         <p class="text-gray-600 text-sm line-clamp-3 mb-4 flex-grow">
                             ${cleanDesc}
                         </p>
