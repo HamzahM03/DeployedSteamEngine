@@ -10,6 +10,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi import Request
+from fastapi.responses import FileResponse, Response
 
 
 # ---- GLOBAL CONFIG ----
@@ -82,9 +84,11 @@ app.add_middleware(
 
 # ---- ENDPOINTS ----
 
-@app.get("/", include_in_schema=False)
-def serve_index():
-    """Serve the main HTML page."""
+@app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
+def serve_index(request: Request):
+    # Let Render's health check HEAD / succeed
+    if request.method == "HEAD":
+        return Response(status_code=200)
     return FileResponse(os.path.join(current_dir, "index.html"))
 
 
